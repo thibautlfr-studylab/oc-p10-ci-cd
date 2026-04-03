@@ -8,9 +8,6 @@ on:
     branches:
       - main
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   backend-test:
     name: Backend - Tests & Coverage
@@ -20,10 +17,10 @@ jobs:
         working-directory: back
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 11
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '11'
           distribution: 'temurin'
@@ -33,7 +30,7 @@ jobs:
         run: mvn -B verify
 
       - name: Upload Backend Coverage Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jacoco-coverage-report
           path: back/target/site/jacoco/
@@ -46,10 +43,10 @@ jobs:
         working-directory: front
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '16'
           cache: 'npm'
@@ -62,8 +59,7 @@ jobs:
         run: npm run test -- --watch=false --browsers=ChromeHeadless --code-coverage
 
       - name: Upload Frontend Coverage Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: karma-coverage-report
           path: front/coverage/
-
