@@ -82,7 +82,7 @@ jobs:
           cache: maven
 
       - name: Compile Backend for Sonar
-        run: mvn -B compile
+        run: mvn -B compile dependency:copy-dependencies
         working-directory: back
 
       - name: Download Backend Coverage
