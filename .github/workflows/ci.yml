@@ -79,6 +79,11 @@ jobs:
         with:
           java-version: '11'
           distribution: 'temurin'
+          cache: maven
+
+      - name: Compile Backend for Sonar
+        run: mvn -B compile
+        working-directory: back
 
       - name: Download Backend Coverage
         uses: actions/download-artifact@v4
