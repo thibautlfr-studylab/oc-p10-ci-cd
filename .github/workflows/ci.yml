@@ -9,16 +9,39 @@ on:
       - main
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Check for changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'back/**'
+            frontend:
+              - 'front/**'
+
   backend-test:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
     name: Backend - Tests & Coverage
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: back
     steps:
+      # Étape 1 : Récupérer le code source
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Étape 2 : Configurer Java 11 pour le build
       - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
@@ -26,9 +49,11 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      # Étape 3 : Compiler et exécuter les tests avec Maven
       - name: Build and test with Maven
         run: mvn -B verify
 
+      # Étape 4 : Sauvegarder le rapport de couverture (Jacoco) sous forme d'artefact pour les prochains jobs
       - name: Upload Backend Coverage Report
         uses: actions/upload-artifact@v4
         with:
@@ -36,15 +61,19 @@ jobs:
           path: back/target/site/jacoco/
 
   frontend-test:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
     name: Frontend - Tests & Coverage
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: front
     steps:
+      # Étape 1 : Récupérer le code source
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Étape 2 : Configurer Node.js pour l'installation et les tests
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -52,12 +81,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: front/package-lock.json
 
+      # Étape 3 : Installer les dépendances NPM
       - name: Install dependencies
         run: npm ci
 
+      # Étape 4 : Exécuter les tests frontend avec Karma
       - name: Run tests with Karma
         run: npm run test -- --watch=false --browsers=ChromeHeadless --code-coverage
 
+      # Étape 5 : Sauvegarder le rapport de couverture frontend
       - name: Upload Frontend Coverage Report
         uses: actions/upload-artifact@v4
         with:
@@ -65,15 +97,19 @@ jobs:
           path: front/coverage/
 
   sonarcloud:
+    # Ce job s'exécute après les tests (backend et frontend) pour analyser la qualité du code
     name: SonarQube Scan
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
+    needs: [changes, backend-test, frontend-test]
+    if: always() && !cancelled() && !contains(needs.*.result, 'failure')
     steps:
+      # Étape 1 : Récupérer le code avec l'historique complet pour l'analyse Sonar
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # Étape 2 : Configurer Java (nécessaire pour l'analyse SonarScanner)
       - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
@@ -81,22 +117,28 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      # Étape 3 : Compiler le backend sans exécuter les tests pour Sonar
       - name: Compile Backend for Sonar
         run: mvn -B compile dependency:copy-dependencies
         working-directory: back
 
+      # Étape 4 : Récupérer le rapport de couverture du backend
       - name: Download Backend Coverage
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: jacoco-coverage-report
           path: back/target/site/jacoco/
 
+      # Étape 5 : Récupérer le rapport de couverture du frontend
       - name: Download Frontend Coverage
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: karma-coverage-report
           path: front/coverage/
 
+      # Étape 6 : Lancer l'analyse SonarQube et envoyer les résultats au serveur
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@master
         env:
@@ -104,36 +146,47 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   docker:
+    # Ce job construit et pousse les images Docker si l'on est sur la branche 'main'
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
-    needs: sonarcloud
-    if: github.ref == 'refs/heads/main'
+    needs: [changes, sonarcloud]
+    if: always() && github.ref == 'refs/heads/main' && needs.sonarcloud.result == 'success'
     steps:
+      # Étape 1 : Récupérer le code source
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Étape 2 : (Optionnel) Ajout du support QEMU pour le multi-architecture
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
+      # Étape 3 : Configurer Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Étape 4 : S'authentifier sur Docker Hub
       - name: Login to Docker Hub
+        # if: ${{ needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Étape 5 : Construire et pousser l'image backend
       - name: Build and push Backend Image
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: docker/build-push-action@v5
         with:
           context: ./back
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/bobapp-back:latest
 
+      # Étape 6 : Construire et pousser l'image frontend
       - name: Build and push Frontend Image
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         uses: docker/build-push-action@v5
         with:
           context: ./front
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/bobapp-front:latest
+
